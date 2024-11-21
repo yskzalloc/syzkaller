@@ -1,0 +1,369 @@
+include <linux/ip.h>
+include <linux/ipv6.h>
+include <linux/route.h>
+include <uapi/linux/if_arp.h>
+include <uapi/linux/netfilter_ipv6/ip6_tables.h>
+include <uapi/linux/wireless.h>
+include <uapi/linux/in.h>
+
+# =================================
+# Common Definitions
+# =================================
+
+sync_id {
+	ProcessId	int32
+	TreeId		int32
+} [packed]
+
+union_smb_req_id [
+	sync_id		sync_id
+	async_id	int64
+]
+
+# SMB2
+smb2_hdr_pre {
+	ProtocolId	const[0xfe534d42, int32be]
+	StructureSize	const[0x40, int16]
+	CreditCharge	int16
+	Status		int32
+} [packed]
+
+# Command
+smb2_hdr_post {
+	CreditRequest	int16
+	Flags		int32
+	NextCommand	int32
+	MessageId	int64
+	Id		union_smb_req_id
+	SessionId	int64
+	Signature	array[int8, 16]
+} [packed]
+
+# smb2_hdr {
+#	smb2_hdr_pre	smb2_hdr_pre
+#	Command			const[0x0, int16]
+#	smb2_hdr_post	smb2_hdr_post
+# } [packed]
+
+# =================================
+# SMB2 Request Definitions
+# =================================
+
+# SMB2_NEGOTIATE (0x0000)
+smb2_negotiate_req {
+# smb2_hdr
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x0, int16]
+	smb2_hdr_post		smb2_hdr_post
+
+	StructureSize		const[36, int16]
+	DialectCount		len[Dialects, int16]
+	SecurityMode		int16
+	Reserved		int16
+	Capabilities		int32
+	ClientGUID		array[int8, 16]
+
+# In SMB3.02 and earlier next three were MBZ le64 ClientStartTime
+	NegotiateContextOffset	int32
+# SMB3.1.1 only. MBZ earlier
+	NegotiateContextCount	int16
+# SMB3.1.1 only. MBZ earlier
+	Reserved2		int16
+	Dialects		buffer[in]
+} [packed]
+
+# SMB3
+#smb3_hdr_req_pre {
+#	ProtocolId			const[0xfe534d42, int32be]
+#	StructureSize		const[0x40, int16]
+#	CreditCharge		int16
+# See MS-SMB2 3.2.4.1 and 3.2.7.1
+#	ChannelSequence		int16
+#	Reserved			int16
+#} [packed]
+# Command
+
+negotiate_message {
+	Signature			array[int8, 8]
+#  NtLmNegotiate = 1
+	MessageType			int32
+	NegotiateFlags			int32
+# MBZ unless SMB3.02 or later
+	DomainName_Length		len[DomainString, int16]
+	DomainName_MaximumLength	len[DomainString, int16]
+	DomainName_Offset		offsetof[DomainString, int32]
+# RFC 1001 and ASCII
+	WorkstationName_Length		len[Workstationname_Buffer, int16]
+	WorkstationName_MaximumLength	len[Workstationname_Buffer, int16]
+	WorkstationName_Offset		offsetof[Workstationname_Buffer, int32]
+
+# struct security_buffer for version info not present since we
+# do not set the version is present flag
+	DomainString			string
+
+# followed by WorkstationString
+	Workstationname_Buffer		string
+} [packed]
+
+smbd_buffer_descriptor_v1 {
+	offset			int64
+	token			int32
+	length			int32
+# followed by Smbd_Buffer
+	smb2_read_req_buffer	string
+} [packed]
+
+# SMB2_READ (0x0008)
+smb2_read_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x8, int16]
+	smb2_hdr_post		smb2_hdr_post
+# Must be 49
+	StructureSize		const[49, int16]
+# offset from start of SMB2 header to place read
+	Padding			int8
+# MBZ unless SMB3.02 or later
+	Flags			int8
+	Length			int32
+	Offset			int64
+	PersistentFileId	int64
+	VolatileFileId		int64
+	MinimumCount		int32
+# MBZ except for SMB3 or later
+	Channel			int32
+	RemainingBytes		int32
+	ReadChannelInfoOffset	offsetof[Buffer, int16]
+	ReadChannelInfoLength	len[Buffer, int16]
+	Buffer			smbd_buffer_descriptor_v1
+} [packed]
+
+# SMB2_SESSION_SETUP (0x0001)
+# Header(64) + Fixed(24) = 88 bytes.
+smb2_sess_setup_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x1, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[25, int16]
+	Flags			int8
+	SecurityMode		int8
+	Capabilities		int32
+	Channel			int32
+	SecurityBufferOffset	offsetof[Buffer, int16]
+	SecurityBufferLength	len[Buffer, int16]
+	PreviousSessionId	int64
+# variable length GSS security buffer
+	Buffer			negotiate_message
+} [packed]
+
+# SMB2_CREATE (0x0005)
+# Header(64) + Fixed(56) = 120 bytes.
+smb2_create_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x5, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[57, int16]
+	SecurityFlags		int8
+	RequestedOplockLevel	int8
+	ImpersonationLevel	int32
+	SmbCreateFlags		int64
+	Reserved		int64
+	DesiredAccess		int32
+	FileAttributes		int32
+	ShareAccess		int32
+	CreateDisposition	int32
+	CreateOptions		int32
+	NameOffset		int16
+	NameLength		int16
+	CreateContextsOffset	int32
+	CreateContextsLength	int32
+	Buffer			buffer[in]
+} [packed]
+
+# SMB2_CLOSE (0x0006)
+smb2_close_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x6, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[24, int16]
+	Flags			int16
+	Reserved		int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+} [packed]
+
+# SMB2_FLUSH (0x0007)
+smb2_flush_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x7, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[24, int16]
+	Reserved1		int16
+	Reserved2		int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+} [packed]
+
+# SMB2_WRITE (0x0009)
+# Header(64) + Fixed(48) = 112 bytes.
+smb2_write_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x9, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[49, int16]
+	DataOffset		int16
+	Length			len[Buffer, int32]
+	Offset			int64
+	PersistentFileId	int64
+	VolatileFileId		int64
+	Channel			int32
+	RemainingBytes		int32
+	WriteChannelInfoOffset	int16
+	WriteChannelInfoLength	int16
+	Flags			int32
+	Buffer			buffer[in]
+} [packed]
+
+# SMB2_LOCK (0x000A)
+smb2_lock_element {
+	Offset		int64
+	Length		int64
+	Flags		int32
+	Reserved	int32
+} [packed]
+
+# SMB2_LOCK (0x000A)
+smb2_lock_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0xa, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[48, int16]
+	LockCount		len[locks, int16]
+	LockSequenceNumber	int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+	locks			array[smb2_lock_element]
+} [packed]
+
+# SMB2_IOCTL (0x000B)
+# Header(64) + Fixed(56) = 120 bytes.
+smb2_ioctl_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0xb, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[57, int16]
+	Reserved		int16
+	CtlCode			int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+	InputOffset		int32
+	InputCount		int32
+	MaxInputResponse	int32
+	OutputOffset		int32
+	OutputCount		int32
+	MaxOutputResponse	int32
+	Flags			int32
+	Reserved2		int32
+	Buffer			buffer[in]
+} [packed]
+
+smb2_echo_req {
+	smb2_hdr_pre	smb2_hdr_pre
+	Command		const[0xd, int16]
+	smb2_hdr_post	smb2_hdr_post
+	StructureSize	const[4, int16]
+	Reserved	int16
+} [packed]
+
+# SMB2_QUERY_DIRECTORY (0x000E)
+# Header(64) + Fixed(32) = 96 bytes.
+smb2_query_directory_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0xe, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[33, int16]
+	FileInformationClass	int8
+	Flags			int8
+	FileIndex		int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+	FileNameOffset		int16
+	FileNameLength		len[Buffer, int16]
+	OutputBufferLength	int32
+	Buffer			buffer[in]
+} [packed]
+
+# SMB2_QUERY_INFO (0x0010)
+# Header(64) + Fixed(40) = 104 bytes.
+smb2_query_info_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x10, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[41, int16]
+	InfoType		int8
+	FileInfoClass		int8
+	OutputBufferLength	int32
+	InputBufferOffset	int16
+	Reserved		int16
+	InputBufferLength	len[Buffer, int32]
+	AdditionalInformation	int32
+	Flags			int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+	Buffer			buffer[in]
+} [packed]
+
+# SMB2_SET_INFO (0x0011)
+# Header(64) + Fixed(32) = 96 bytes.
+smb2_set_info_req {
+	smb2_hdr_pre		smb2_hdr_pre
+	Command			const[0x11, int16]
+	smb2_hdr_post		smb2_hdr_post
+	StructureSize		const[33, int16]
+	InfoType		int8
+	FileInfoClass		int8
+	BufferLength		len[Buffer, int32]
+	BufferOffset		int16
+	Reserved		int16
+	AdditionalInformation	int32
+	PersistentFileId	int64
+	VolatileFileId		int64
+	Buffer			buffer[in]
+} [packed]
+
+# =================================
+# PDU Definition and Syscall
+# =================================
+
+# Union of all supported SMB2 requests
+union_smb2_req [
+	smb2_negotiate_req		smb2_negotiate_req
+	smb2_sess_setup_req		smb2_sess_setup_req
+	smb2_echo_req			smb2_echo_req
+	smb2_read_req			smb2_read_req
+	smb2_write_req			smb2_write_req
+	smb2_close_req			smb2_close_req
+	smb2_flush_req			smb2_flush_req
+	smb2_lock_req			smb2_lock_req
+	smb2_query_directory_req	smb2_query_directory_req
+	smb2_set_info_req		smb2_set_info_req
+	smb2_create_req			smb2_create_req
+	smb2_ioctl_req			smb2_ioctl_req
+	smb2_query_info_req		smb2_query_info_req
+] [varlen]
+
+# A compound SMB2 request (chaining via NextCommand field in header)
+smb2_req {
+	req_base	union_smb2_req
+	req_andx1	optional[union_smb2_req]
+	req_andx2	optional[union_smb2_req]
+} [packed]
+
+# Top-level PDU including RFC1002 length (NetBIOS over TCP/IP)
+# RFC1002 header (Transport layer) is Big Endian.
+smb2_req_pdu {
+	pdu_size	len[req, int32be]
+	req		smb2_req
+} [packed]
+
+# Syscall definition (assuming a pseudo-syscall for interacting with ksmbd)
+syz_ksmbd_send_req(req_packet ptr[in, smb2_req_pdu], req_len len[req_packet], res_packet buffer[out], res_len len[res_packet])
