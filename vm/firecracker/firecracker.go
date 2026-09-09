@@ -214,7 +214,7 @@ func (pool *Pool) Create(ctx context.Context, workdir string, index int) (vmimpl
 		os:       pool.env.OS,
 		timeouts: pool.env.Timeouts,
 		workdir:  workdir,
-		sock:     filepath.Join(workdir, "firecracker.sock"),
+		sock:     filepath.Join(os.TempDir(), fmt.Sprintf("fc-%v-%v.sock", os.Getpid(), index)),
 		SSHOptions: vmimpl.SSHOptions{
 			// Firecracker has no user mode networking, so we always talk to the guest
 			// over the tap network.
