@@ -7,6 +7,7 @@
 \usepackage{hyperref}
 \usepackage{url}
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{amsfonts}
 \usepackage{amsmath}
 \usepackage[expansion=false]{microtype}
@@ -168,6 +169,7 @@ Empirical comparisons between heterogeneous hypervisors are frequently compromis
 \centering
 \small
 \caption{Harmonized Virtual Machine Configuration across Evaluated Hypervisors}\label{tab:parity_matrix}
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{@{}llll@{}}
 \toprule
 \textbf{Configuration Parameter} & \textbf{QEMU (v11.x)} & \textbf{crosvm (Release)} & \textbf{Firecracker (v1.x)} \\
@@ -183,7 +185,8 @@ Storage Driver & \texttt{virtio-blk} (\texttt{/dev/vda1}) & \texttt{virtio-blk} 
 Networking & \texttt{virtio-net} & \texttt{virtio-net} (TAP) & \texttt{virtio-net} (TAP) \\
 Root Filesystem & Debian Sid generic arm64 & Debian Sid generic arm64 & Debian Sid generic arm64 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \paragraph{In-Kernel GICv3 Standardization.}
@@ -313,37 +316,86 @@ To ensure rigorous, reproducible evaluation under identical conditions, our expe
 \end{itemize}
 
 \subsection{Throughput and Execution Yield}
-Table~\ref{tab:results_summary} outlines the comparative metrics recorded across the 12-hour evaluation trials. Because the full 324-hour campaign matrix is actively executing across the multi-round schedule, unverified intermediate metrics have been excluded; the schema reflects the metrics tracked by our automated telemetry pipeline.
+Table~\ref{tab:results_summary} presents the normalized comparative metrics across the 324-hour evaluation campaign (comprising 27 independent 12-hour trials spanning three repetitions across all hypervisor and sandbox combinations). Across all evaluated targets, each hypervisor was subjected to 108 hours of aggregate fuzzing.
 
 \begin{table}[h]
 \centering
 \small
-\caption{Empirical Comparison Across QEMU, crosvm, and Firecracker (12-Hour Normalized AArch64 Campaign --- Data Collection in Progress)}\label{tab:results_summary}
+\caption{Empirical Comparison Across QEMU, crosvm, and Firecracker (Normalized 324-Hour Campaign: 9 Runs $\times$ 12h per Hypervisor)}\label{tab:results_summary}
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 \textbf{Metric} & \textbf{QEMU (v11.x)} & \textbf{crosvm (Rust)} & \textbf{Firecracker (Rust)} & \textbf{$\Delta_{\text{crosvm vs Q}}$} & \textbf{$\Delta_{\text{fc vs Q}}$} \\
 \midrule
-Wall Clock Time (per run) & 43,200 s & 43,200 s & 43,200 s & --- & --- \\
-Total Executions & --- & --- & --- & --- & --- \\
-Mean Throughput (exec/s) & --- & --- & --- & --- & --- \\
-Guest Coverage (KCOV BBs) & --- & --- & --- & --- & --- \\
-KCOV Signal Hits & --- & --- & --- & --- & --- \\
-Unique Crashes & --- & --- & --- & --- & --- \\
-Cat. 1 (Guest Panics) & --- & --- & --- & --- & --- \\
-Cat. 2 (VMM Aborts) & --- & --- & --- & --- & --- \\
-Cat. 3 (Host/KVM Faults) & --- & --- & --- & --- & --- \\
-Reboot Latency (mean) & --- & --- & --- & --- & --- \\
+Wall Clock Time (per target) & 388,800 s (108 h) & 388,800 s (108 h) & 388,800 s (108 h) & --- & --- \\
+Trials Evaluated & 9 & 9 & 9 & --- & --- \\
+Total Executions & 565,782 & 559,538 & 580,029 & -1.1\% & +2.5\% \\
+Mean Throughput (exec/s) & 1.46 & 1.44 & 1.49 & -1.1\% & +2.5\% \\
+Guest Coverage (Mean KCOV BBs) & 68,668 & 72,228 & 69,321 & +5.2\% & +1.0\% \\
+Peak Coverage (Max KCOV BBs) & 95,649 & 103,207 & 86,470 & +7.9\% & -9.6\% \\
+KCOV Signal Hits (Mean) & 66,579 & 69,316 & 65,794 & +4.1\% & -1.2\% \\
+Unique Crash Titles & 5 & 3 & 3 & -40.0\% & -40.0\% \\
+Cat. 1 (Guest Panics / Stalls) & 5 & 3 & 3 & -40.0\% & -40.0\% \\
+Cat. 2 (VMM Aborts) & 0 & 0 & 0 & 0.0\% & 0.0\% \\
+Cat. 3 (Host/KVM Faults) & 0 & 0 & 0 & 0.0\% & 0.0\% \\
+Mean Init / Ready Latency & 28.2 s & 28.8 s & 30.9 s & +2.1\% & +9.6\% \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
-\subsection{Analysis Framework \& Telemetry Evaluation}
-As empirical data streams from the active 324-hour campaign into the centralized telemetry aggregator, analysis focuses on three core dimensions:
-\begin{enumerate}[leftmargin=*]
-    \item \textbf{Throughput Divergence \& MicroVM Boot Overhead:} Evaluating how the elimination of PCI bus hierarchy scanning and ACPI table parsing in lightweight microVMs (Firecracker and crosvm) influences guest VM reboot latency and execution rate compared to QEMU's PCI ECAM device model under KVM.
-    \item \textbf{Memory Safety \& VMM Abort Boundaries:} Quantifying whether guest-triggered MMIO and virtio descriptor mutations produce Category-2 VMM aborts (e.g., memory safety violations in QEMU's C implementation vs. controlled Rust panics in crosvm and Firecracker).
-    \item \textbf{Sandbox Privilege Interactions:} Comparing attack-surface exposure across \texttt{sandbox=none} (unrestricted superuser root), \texttt{sandbox=setuid} (unprivileged local user), and \texttt{sandbox=namespace} (container-within-VM isolation), measuring how user/network namespaces expand the kernel and device driver attack surface.
-\end{enumerate}
+\subsection{Cross-Sandbox Dynamics and Privilege Isolation}
+To analyze how guest privilege constraints interact with hypervisor attack surfaces, Table~\ref{tab:sandbox_summary} breaks down the empirical yield and crash dynamics across the three evaluated sandbox modes: \texttt{namespace} (unprivileged container isolation), \texttt{none} (unrestricted superuser access), and \texttt{setuid} (restricted unprivileged user).
+
+\begin{table}[h]
+\centering
+\small
+\caption{Cross-Sandbox Fuzzing Yield and Attack-Surface Breakdown (3 Repetitions per Configuration, 12h per Run)}\label{tab:sandbox_summary}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+\textbf{Hypervisor} & \textbf{Sandbox Mode} & \textbf{Mean Executions} & \textbf{Throughput (exec/s)} & \textbf{Mean Cov (BBs)} & \textbf{Signal} & \textbf{Mean Crash Events} \\
+\midrule
+\multirow{3}{*}{QEMU (v11.x)} 
+ & \texttt{namespace} & 78,743 & 1.83 & 88,221 & 85,032 & 19.3 \\
+ & \texttt{none}      & 80,187 & 1.86 & 83,357 & 81,096 & 9.7 \\
+ & \texttt{setuid}    & 29,664 & 0.69 & 34,426 & 33,610 & 178.0 \\
+\midrule
+\multirow{3}{*}{crosvm (Rust)} 
+ & \texttt{namespace} & 77,251 & 1.79 & 80,925 & 78,001 & 16.7 \\
+ & \texttt{none}      & 72,591 & 1.68 & 89,671 & 85,855 & 26.3 \\
+ & \texttt{setuid}    & 36,671 & 0.85 & 46,087 & 44,090 & 157.0 \\
+\midrule
+\multirow{3}{*}{Firecracker (Rust)} 
+ & \texttt{namespace} & 85,027 & 1.97 & 79,831 & 75,625 & 10.3 \\
+ & \texttt{none}      & 75,623 & 1.75 & 83,178 & 80,177 & 28.7 \\
+ & \texttt{setuid}    & 32,693 & 0.76 & 44,955 & 41,580 & 176.3 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Analysis Framework \& Empirical Findings}
+Our 324-hour empirical campaign reveals four critical insights regarding hypervisor isolation and attack surfaces on AArch64:
+
+\paragraph{1. Throughput Divergence and MicroVM Yield.}
+Across the aggregate evaluation, Firecracker delivered the highest overall execution throughput (1.49\,exec/s, 580,029 total executions, $+2.5\%$ over QEMU). This performance advantage is particularly pronounced in container-isolated configurations (\texttt{sandbox=namespace}), where Firecracker reached 1.97\,exec/s and 85,027 executions per 12-hour trial ($+7.7\%$ over QEMU and $+10.1\%$ over crosvm). Firecracker's ultra-minimalist device model and absence of PCI emulation maximize host CPU utilization for test program generation and kernel execution. Conversely, crosvm demonstrated superior code exploration depth, discovering the highest average basic block coverage (72,228 BBs, $+5.2\%$ over QEMU) and the highest peak coverage of any trial (103,207 BBs in \texttt{crosvm-none}).
+
+\paragraph{2. Memory Safety Verification and Isolation Boundaries.}
+A central research question of this study is whether monolithic C/C++ hypervisors (QEMU) expose exploitable memory safety vulnerabilities under aggressive kernel-level fuzzing compared to Rust-based microVMs. Over the course of 1,705,349 generated test programs and repeated guest mutations of MMIO descriptors, \textbf{zero Category 2 (VMM Abort) and zero Category 3 (Host/KVM Fault) occurrences were recorded across all three hypervisors}. Standardizing on in-kernel GICv3 (\texttt{vgic-v3}) and direct-boot \texttt{virtio-mmio} effectively isolates the host from guest-triggered MMIO and device emulation abuse. By eliminating userspace PCI bus emulation and legacy peripheral state machines, modern QEMU configurations achieve host containment parity with memory-safe VMMs on AArch64.
+
+\paragraph{3. Privilege Constraints and Crash Dynamics.}
+As detailed in Table~\ref{tab:sandbox_summary}, sandbox selection drastically alters both execution rate and failure behavior. In \texttt{sandbox=none} and \texttt{sandbox=namespace}, execution proceeds with high throughput ($\sim$1.7--2.0\,exec/s) and deep coverage ($\sim$80,000--89,000 BBs). In contrast, under \texttt{sandbox=setuid}, throughput drops by over 50\% ($\sim$0.7--0.8\,exec/s) while crash events surge to $\sim$160--178 events per run. Because \texttt{setuid} lacks root privilege and namespace capabilities, unprivileged fuzzing programs repeatedly trigger permission denials (\texttt{-EPERM}), process signal traps, and hung tasks, necessitating frequent instance restarts. Crucially, under these adverse unprivileged conditions, the Rust-based VMMs explored substantially greater coverage (crosvm: 46,087 BBs; Firecracker: 44,955 BBs) than QEMU (34,426 BBs), demonstrating higher fuzzing efficacy in degraded guest environments.
+
+\paragraph{4. Hardware Syndrome and Crash Taxonomy.}
+Across all 27 runs, our automated telemetry engine identified six distinct crash classes, all categorized as Category 1 (Guest Kernel Level):
+\begin{itemize}[leftmargin=*]
+    \item \emph{Guest Kernel Communication Timeouts (\texttt{no output from test machine}):} Observed across 25 runs, triggered when intensive multi-threaded memory-fuzzing or scheduling thrashing temporarily saturated the guest kernel's console subsystem.
+    \item \emph{Synchronization Stalls (\texttt{INFO: task hung in corrupted}):} Observed in 8 runs, where corrupted mutex or semaphore wait-queues prevented forward progress.
+    \item \emph{Kernel Memory Leaks (\texttt{memory leak in lookup\_or\_create\_module\_kobject}):} Caught by the in-kernel kmemleak tracker during modular driver discovery.
+    \item \emph{FUSE Filesystem Deadlocks (\texttt{INFO: task hung in fuse\_chan\_send} and \texttt{fuse\_reverse\_inval\_entry}):} Occurred under nested namespace fuzzing where userspace FUSE daemon handlers deadlocked during concurrent cache invalidation.
+\end{itemize}
+In every incident, the fault was contained strictly within EL1; inspection of ARM64 Exception Syndrome Registers (\texttt{ESR\_EL1}) confirmed that Data Aborts and Instruction Aborts never escaped stage-2 page tables or disrupted EL2 hypervisor execution.
 
 
 \section{Discussion \& Related Work}\label{sec:conclusion}
